@@ -1,0 +1,117 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: |
+  Project 101 - Kittens Carousel Static Website deployed on AWS EC2 using CloudFormation.
+  
+Parameters:
+  VPCParameter:
+    Description: Select your VPC.
+    Type: AWS::EC2::VPC::Id
+    Default: vpc-098a488fcca7d1dac
+
+  SubnetParameter:
+    Description: Select one public subnet for the EC2 instance.
+    Type: AWS::EC2::Subnet::Id
+    Default: subnet-08be1ff68114e6b38
+
+  InstanceTypeParameter:
+    Description: Enter t2.micro, t3.micro, or t3.small. Default is t3.micro.
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+      - t2.micro
+      - t3.micro
+      - t3.small
+
+  KeyNameParameter:
+    Description: Select your key pair to allow SSH access to the EC2 instance.
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: Linux-key-pair
+
+  GitHubRepoURL:
+    Description: Enter your public GitHub repository clone URL ending with .git.
+    Type: String
+    Default: https://github.com/iam-oluchukwu/101-kittens-carousel-static-website-ec2.git
+
+  LatestAmiId:
+    Description: Latest Amazon Linux 2023 AMI ID from AWS Systems Manager Parameter Store.
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Resources:
+  myEC2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceTypeParameter
+      KeyName: !Ref KeyNameParameter
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: "0"
+          GroupSet:
+            - !GetAtt mySG.GroupId
+          SubnetId: !Ref SubnetParameter
+      Tags:
+        - Key: Name
+          Value: !Sub Web Server of ${AWS::StackName}
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash
+            # update os
+            dnf update -y
+
+            # install apache web server and git
+            dnf install -y httpd git
+
+            # start and enable apache web server
+            systemctl start httpd
+            systemctl enable httpd
+
+            # remove default apache web page files
+            rm -rf /var/www/html/*
+
+            # download project files from GitHub
+            cd /tmp
+            rm -rf kittens-carousel-app
+            git clone ${GitHubRepoURL} kittens-carousel-app
+
+            # copy the static website files into apache root directory
+            cp -r /tmp/kittens-carousel-app/static-web/* /var/www/html/
+
+            # set correct ownership and permissions
+            chown -R apache:apache /var/www/html
+            chmod -R 755 /var/www/html
+
+            # restart apache web server
+            systemctl restart httpd
+
+  mySG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allows SSH and HTTP
+      VpcId: !Ref VPCParameter
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 22
+          IpProtocol: tcp
+          ToPort: 22
+        - CidrIp: 0.0.0.0/0
+          FromPort: 80
+          IpProtocol: tcp
+          ToPort: 80
+      Tags:
+        - Key: Name
+          Value: !Sub Security Group of ${AWS::StackName}
+
+Outputs:
+  WebsiteURL:
+    Description: Kittens Carousel Application Website URL.
+    Value: !Sub http://${myEC2.PublicDnsName}
+
+  PublicIPAddress:
+    Description: Public IP address of the EC2 web server.
+    Value: !GetAtt myEC2.PublicIp
+
+  InstanceId:
+    Description: Instance ID of the EC2 web server.
+    Value: !Ref myEC2
